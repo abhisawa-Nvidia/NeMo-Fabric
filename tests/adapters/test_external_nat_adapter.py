@@ -41,7 +41,7 @@ def _fabric_workflow(
 
 
 def _mcp_server(**values: Any) -> AgentMcpServerConfig:
-    return AgentMcpServerConfig.model_validate(values)
+    return AgentMcpServerConfig.from_mapping(values)
 
 
 @pytest.fixture(name="make_payload")
@@ -92,7 +92,7 @@ def make_payload_fixture(tmp_path: Path):
 
         return {
             "base_dir": str(tmp_path),
-            "config": AgentConfig.model_validate(config),
+            "config": AgentConfig.from_mapping(config),
             "runtime_context": {
                 "runtime_id": "runtime-1",
                 "environment": {"workspace": str(tmp_path)},
@@ -271,7 +271,10 @@ def test_main_opts_the_nat_host_into_typed_agent_config(
 
     adapter.main()
 
-    serve.assert_called_once_with(adapter.NatRuntime, config_model=AgentConfig)
+    serve.assert_called_once_with(
+        adapter.NatRuntime,
+        config_loader=AgentConfig.from_mapping,
+    )
 
 
 def test_build_mapping_translates_components_models_and_instruction(
@@ -425,9 +428,7 @@ def test_typed_examples_project_and_translate_through_one_nat_adapter(
         "ref": "fabric.agent.react",
     }
     assert "schema_version" not in southbound
-    nat_config = adapter.build_nat_config_mapping(
-        AgentConfig.model_validate(southbound)
-    )
+    nat_config = adapter.build_nat_config_mapping(AgentConfig.from_mapping(southbound))
     assert nat_config["workflow"]["_type"] == "react_agent"
     if example == "calculator.py":
         assert nat_config["function_groups"]["calculator"]["_type"] == "mcp_client"
@@ -447,7 +448,10 @@ def test_calculator_example_uses_the_source_stdio_server():
     calculator = config.mcp.servers["calculator"]
 
     assert calculator.transport == "stdio"
-    assert "calculator_mcp.py" in calculator.url
+    assert calculator.url == sys.executable
+    assert calculator.args == [
+        str(ROOT / "external" / "nat" / "examples" / "calculator_mcp.py")
+    ]
     assert calculator.blocked_tools == ["divide"]
 
 
@@ -1045,8 +1049,15 @@ def test_mcp_stdio_expands_command_and_maps_structured_args_and_env(
         "calculator",
         _mcp_server(
             transport="stdio",
-            url="$NAT_TEST_MCP_COMMAND --label 'safe mode' --port 9000",
-            args=["--trace", "--request-timeout=10"],
+            url="$NAT_TEST_MCP_COMMAND",
+            args=[
+                "--label",
+                "safe mode",
+                "--port",
+                "9000",
+                "--trace",
+                "--request-timeout=10",
+            ],
             env={"NAT_MCP_TOKEN": "test-token"},
         ),
     )
@@ -1066,25 +1077,24 @@ def test_mcp_stdio_expands_command_and_maps_structured_args_and_env(
     }
 
 
-def test_mcp_stdio_rejects_unbalanced_quotes():
-    with pytest.raises(adapter.lifecycle.LifecycleError) as error:
-        adapter.nat_mcp_server_config(
-            "calculator",
-            _mcp_server(transport="stdio", url="mcp-server --label 'unterminated"),
-        )
-
-    assert error.value.code == "nat_invalid_mcp_server"
-    assert error.value.message == (
-        "NAT MCP server 'calculator' has an invalid stdio command"
+def test_mcp_stdio_preserves_a_command_with_spaces_without_shell_parsing():
+    result = adapter.nat_mcp_server_config(
+        "calculator",
+        _mcp_server(transport="stdio", url="/opt/MCP Servers/calculator"),
     )
+
+    assert result == {
+        "transport": "stdio",
+        "command": "/opt/MCP Servers/calculator",
+    }
 
 
 def test_mcp_stdio_rejects_a_whitespace_only_command():
+    server = _mcp_server(transport="stdio", url="placeholder")
+    object.__setattr__(server, "url", " \t\n ")
+
     with pytest.raises(adapter.lifecycle.LifecycleError) as error:
-        adapter.nat_mcp_server_config(
-            "calculator",
-            AgentMcpServerConfig.model_construct(transport="stdio", url=" \t\n "),
-        )
+        adapter.nat_mcp_server_config("calculator", server)
 
     assert error.value.code == "nat_invalid_mcp_server"
     assert error.value.message == (
@@ -1094,13 +1104,8 @@ def test_mcp_stdio_rejects_a_whitespace_only_command():
 
 @pytest.mark.parametrize("transport", ["websocket", ""])
 def test_mcp_server_rejects_unsupported_transport(transport: str):
-    server = (
-        _mcp_server(transport=transport, url="https://mcp.test")
-        if transport
-        else AgentMcpServerConfig.model_construct(
-            transport=transport, url="https://mcp.test"
-        )
-    )
+    server = _mcp_server(transport=transport or "placeholder", url="https://mcp.test")
+    object.__setattr__(server, "transport", transport)
     with pytest.raises(adapter.lifecycle.LifecycleError) as error:
         adapter.nat_mcp_server_config(
             "docs",

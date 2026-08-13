@@ -51,8 +51,10 @@ translation:
   target `harness`, `adapter_kind`, and runner binding.
 - Set `config.input` to `agent_config` for a new adapter.
 - Declare only normalized `config.accepts` fields the implementation enforces.
-- Publish closed `settings_schema`, `workflow_schema`,
-  `tool_definition_schema`, and `extension_schemas` where applicable.
+- Publish closed `settings_schema`, `model_schema`, `workflow_schema`,
+  `tool_definition_schema`, and `extension_schemas` where applicable. Use
+  `model_schema` only for static model/provider compatibility and model settings;
+  keep credential validity and provider availability in startup validation.
 - Declare runtime requirements and telemetry outputs without secret values.
 - Leave optional capability flags false unless the installed NeMo Fabric runtime
   exposes and tests that adapter operation. Relay-backed ATOF streaming does
@@ -71,10 +73,20 @@ Install the descriptor in the standard shared-data location. For setuptools:
 "share/nemo-fabric/adapters/acme" = ["fabric-adapter.json"]
 ```
 
-Depend on `nemo-fabric-adapter-contract` for typed Pydantic models. Add
+Depend on `nemo-fabric-adapter-contract` for typed standard-library dataclasses.
+Install its optional `pydantic` extra only for Pydantic interoperability. Add
 `nemo-fabric-adapters-common` only if the adapter chooses its lifecycle or
 Relay helpers. A bare adapter package should not depend on the NeMo Fabric
 runtime.
+
+For a TypeScript adapter, depend on
+`nemo-fabric-adapter-contract`. Import descriptor, configuration,
+runtime-context, request, and result types from the package root, matching the
+Python package's single model namespace. Request and result types are for work
+on the future typed invocation boundary and are not part of the current host
+protocol. TypeScript types do not validate data received from a process or
+network boundary; validate untrusted values against the JSON Schemas included
+with the package.
 
 ## Map AgentConfig
 
@@ -119,7 +131,7 @@ from nemo_fabric_adapters.common import lifecycle
 
 class TargetRuntime:
     async def start(self, payload):
-        config: AgentConfig = payload["agent_config"]
+        config: AgentConfig = payload["config"]
         ...
 
     async def invoke(self, payload):
@@ -130,16 +142,13 @@ class TargetRuntime:
 
 
 def main() -> None:
-    lifecycle.serve(TargetRuntime, config_model=AgentConfig)
+    lifecycle.serve(TargetRuntime, config_loader=AgentConfig.from_mapping)
 ```
 
 Keep current host request/result conversion in dedicated functions. The
 published `AgentRunRequest` and `AgentRunResult` types are preview-only and are
 not part of the negotiated contract. Do not return `AgentRunResult` from the
 current local host: it is treated as ordinary JSON, including `status: failed`.
-When using `config_model`, read the typed model from `payload["agent_config"]`.
-The host keeps `payload["config"]` as its original mapping so existing shared
-utility accessors remain usable.
 
 ## Handle Custom Agents
 

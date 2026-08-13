@@ -198,6 +198,12 @@
             "$ref": "#/$defs/AdapterTelemetryProviderSupport"
           },
           "description": "Provider-specific telemetry capabilities supported by this adapter.",
+          "propertyNames": {
+            "enum": [
+              "relay",
+              "native"
+            ]
+          },
           "type": "object"
         }
       },
@@ -242,6 +248,7 @@
     "adapter_id": {
       "description": "Unique id for this adapter implementation.",
       "minLength": 1,
+      "pattern": "\\S",
       "type": "string"
     },
     "adapter_kind": {
@@ -266,6 +273,7 @@
       "description": "NeMo Fabric config areas this adapter consumes or generates."
     },
     "contract_version": {
+      "const": "fabric.adapter/v1alpha2",
       "description": "Adapter descriptor contract version.",
       "minLength": 1,
       "type": "string"
@@ -303,7 +311,16 @@
     "harness": {
       "description": "Stable machine-readable harness identifier implemented by this adapter.",
       "minLength": 1,
+      "pattern": "\\S",
       "type": "string"
+    },
+    "model_schema": {
+      "additionalProperties": true,
+      "description": "JSON Schema applied to every normalized `FabricConfig.models` entry.",
+      "type": [
+        "object",
+        "null"
+      ]
     },
     "requirements": {
       "$ref": "#/$defs/AdapterRequirements",
